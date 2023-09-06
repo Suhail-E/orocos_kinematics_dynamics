@@ -951,7 +951,7 @@ void SolverTest::VereshchaginTest()
 
     // Acceleration energy for the end-effector.
     JntArray beta_energy(number_of_constraints);
-    beta_energy(0) = -0.5;
+    beta_energy(0) = -0.8;
     beta_energy(1) = -0.5;
     beta_energy(2) =  0.0;
     beta_energy(3) =  0.0; // this value has no impact on computations, since its corresponding constraint is disabled
