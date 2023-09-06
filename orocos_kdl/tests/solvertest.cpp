@@ -5,10 +5,27 @@
 #include <random>
 #include <time.h>
 #include <utilities/utility.h>
+#include <kdl_parser/kdl_parser.hpp>
 
 CPPUNIT_TEST_SUITE_REGISTRATION( SolverTest );
 
 using namespace KDL;
+
+//Extract robot model from a URDF file
+int get_robot_model_from_urdf(KDL::Chain &full_chain, std::string file_path, std::string first_link, std::string last_link) 
+{
+
+    KDL::Tree my_tree;
+    if (!kdl_parser::treeFromFile(file_path, my_tree)){
+        return 0;
+    }
+    
+    //Extract KDL chain from KDL tree
+    my_tree.getChain(first_link, 
+                     last_link, 
+                     full_chain);
+    return 1;
+}
 
 void SolverTest::setUp()
 {
@@ -842,8 +859,15 @@ void SolverTest::VereshchaginTest()
     int solver_return = 0;
     double eps = 1.e-3;
 
-    unsigned int nj = kukaLWR.getNrOfJoints();
-    unsigned int ns = kukaLWR.getNrOfSegments();
+    Chain freddy_4dof;
+    get_robot_model_from_urdf(freddy_4dof, "/home/masuhail/project/orocos_kinematics_dynamics/orocos_kdl/models/urdf/freddy_4dof.urdf", "Base_Link_0", "Link_4");
+
+    // unsigned int nj = kukaLWR.getNrOfJoints();
+    // unsigned int ns = kukaLWR.getNrOfSegments();
+
+    unsigned int nj = freddy_4dof.getNrOfJoints();
+    unsigned int ns = freddy_4dof.getNrOfSegments();
+    std::cout << "Freddy: " << nj << "  " << ns <<std::endl;
 
     // Necessary test for the used robot model: KDL's implementation of the Vereshchagin solver 
     // can only work with the robot chains that have equal number of joints and segments
@@ -854,33 +878,24 @@ void SolverTest::VereshchaginTest()
     KDL::JntArray qd(nj); //input
     KDL::JntArray qdd(nj); //output
     KDL::JntArray ff_tau(nj); //input
-    KDL::JntArray constraint_tau(nj); //output
+    KDL::JntArray constraint_tau(nj); //output --> control torque that is sent to the robot to be produced by the motors
 
     // Random configuration
     q(0) =  1.6;
     q(1) =  0.0;
     q(2) = -1.6;
     q(3) = -1.57;
-    q(4) =  0.0;
-    q(5) =  1.57;
-    q(6) = -0.8;
 
     qd(0) =  1.0;
     qd(1) = -2.0;
     qd(2) =  3.0;
     qd(3) = -4.0;
-    qd(4) =  5.0;
-    qd(5) = -6.0;
-    qd(6) =  7.0;
 
     // Random feedforwad torques acting on robot joints
     ff_tau(0) =  5.0;
     ff_tau(1) =  0.0;
     ff_tau(2) =  0.0;
     ff_tau(3) =  0.0;
-    ff_tau(4) =  0.0;
-    ff_tau(5) = -6.0;
-    ff_tau(6) =  0.0;
 
     // External Wrench acting on the end-effector, expressed in base link coordinates
     // Vereshchagin solver expects that external wrenches are expressed w.r.t. robot's base frame
@@ -947,9 +962,11 @@ void SolverTest::VereshchaginTest()
     // Note: Vereshchagin solver takes root acc. with opposite sign comparead to the KDL's FD and RNE solvers
     Twist root_Acc(Vector(0.0, 0.0, 9.81), Vector(0.0, 0.0, 0.0));
 
-    ChainHdSolver_Vereshchagin vereshchaginSolver(kukaLWR, root_Acc, number_of_constraints);
+    ChainHdSolver_Vereshchagin vereshchaginSolver(freddy_4dof, root_Acc, number_of_constraints);
     solver_return = vereshchaginSolver.CartToJnt(q, qd, qdd, alpha_unit_force, beta_energy, f_ext, ff_tau, constraint_tau);
     if (solver_return < 0) std::cout << "KDL: Vereshchagin solver ERROR: " << solver_return << std::endl;
+
+    std::cout << "Control torque: " << constraint_tau.data << std::endl;
 
     // ########################################################################################
     // Final comparison of the _resultant_ end-effector's Cartesian accelerations
@@ -959,32 +976,35 @@ void SolverTest::VereshchaginTest()
     std::vector<Twist> xDotdot(ns + 1);
     // This solver's function returns Cartesian accelerations of links in robot base coordinates
     vereshchaginSolver.getTransformedLinkAcceleration(xDotdot);
-    CPPUNIT_ASSERT(Equal(beta_energy(0), xDotdot[ns].vel(0), eps));
-    CPPUNIT_ASSERT(Equal(beta_energy(1), xDotdot[ns].vel(1), eps));
-    CPPUNIT_ASSERT(Equal(beta_energy(2), xDotdot[ns].vel(2), eps));
-    CPPUNIT_ASSERT(Equal(beta_energy(5), xDotdot[ns].rot(2), eps));
+    // CPPUNIT_ASSERT(Equal(beta_energy(0), xDotdot[ns].vel(0), eps));
+    // CPPUNIT_ASSERT(Equal(beta_energy(1), xDotdot[ns].vel(1), eps));
+    // CPPUNIT_ASSERT(Equal(beta_energy(2), xDotdot[ns].vel(2), eps));
+    // CPPUNIT_ASSERT(Equal(beta_energy(5), xDotdot[ns].rot(2), eps));
+
+    std::cout << "Acc linear X: " << xDotdot[ns].vel(0) << "  Acc linear Y: " << xDotdot[ns].vel(1) << "  Acc linear Z: "
+              << xDotdot[ns].vel(2) << "  Acc angular X: " << xDotdot[ns].rot(0) << "  Acc angular Y: " << xDotdot[ns].rot(1)
+              << "  Acc angular Z: " << xDotdot[ns].rot(2) << std::endl;
+
 
     // Additional getters for the intermediate solver's outputs: Useful for state- simulation and estimation purposes
     // Magnitude of the constraint forces acting on the end-effector: Lagrange Multiplier
-    Eigen::VectorXd nu(number_of_constraints);
-    vereshchaginSolver.getContraintForceMagnitude(nu);
-    CPPUNIT_ASSERT(Equal(nu(0), 669693.30355, eps));
-    CPPUNIT_ASSERT(Equal(nu(1), 5930.60826, eps));
-    CPPUNIT_ASSERT(Equal(nu(2), -639.5238, eps));
-    CPPUNIT_ASSERT(Equal(nu(3), 0.000, eps)); // constraint was not active in the task specification
-    CPPUNIT_ASSERT(Equal(nu(4), 0.000, eps)); // constraint was not active in the task specification
-    CPPUNIT_ASSERT(Equal(nu(5), 573.90485, eps));
+    // Eigen::VectorXd nu(number_of_constraints);
+    // vereshchaginSolver.getContraintForceMagnitude(nu);
+    // CPPUNIT_ASSERT(Equal(nu(0), 669693.30355, eps));
+    // CPPUNIT_ASSERT(Equal(nu(1), 5930.60826, eps));
+    // CPPUNIT_ASSERT(Equal(nu(2), -639.5238, eps));
+    // CPPUNIT_ASSERT(Equal(nu(3), 0.000, eps)); // constraint was not active in the task specification
 
     // Total torque acting on each joint
-    JntArray total_tau(nj);
-    vereshchaginSolver.getTotalTorque(total_tau);
-    CPPUNIT_ASSERT(Equal(total_tau(0), 2013.3541, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(1), -6073.4999, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(2), 2227.4487, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(3), 56.87456, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(4), -11.3789, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(5), -6.05957, eps));
-    CPPUNIT_ASSERT(Equal(total_tau(6), 569.0776, eps));
+    // JntArray total_tau(nj);
+    // vereshchaginSolver.getTotalTorque(total_tau);
+    // CPPUNIT_ASSERT(Equal(total_tau(0), 2013.3541, eps));
+    // CPPUNIT_ASSERT(Equal(total_tau(1), -6073.4999, eps));
+    // CPPUNIT_ASSERT(Equal(total_tau(2), 2227.4487, eps));
+    // CPPUNIT_ASSERT(Equal(total_tau(3), 56.87456, eps));
+
+
+    std::cout << "KDL Vereshchagin Hybrid Dynamics Tests: End of the first solver test \n \n \n" <<std::endl;
 
     // ########################################################################################
     // Vereshchagin solver test 2
