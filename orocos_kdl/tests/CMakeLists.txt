@@ -17,8 +17,11 @@ IF(ENABLE_TESTS)
   COMPILE_FLAGS "${CMAKE_CXX_FLAGS_ADD} ${KDL_CFLAGS}")
  ADD_TEST(NAME kinfamtest COMMAND kinfamtest)
 
+ find_package(kdl_parser)
+ include_directories(${kdl_parser_INCLUDE_DIRS})
+
  ADD_EXECUTABLE(solvertest solvertest.cpp test-runner.cpp)
- TARGET_LINK_LIBRARIES(solvertest orocos-kdl ${CPPUNIT})
+ TARGET_LINK_LIBRARIES(solvertest orocos-kdl ${kdl_parser_LIBRARIES} ${CPPUNIT})
  SET(TESTNAME "solvertest")
  SET_TARGET_PROPERTIES( solvertest PROPERTIES
   COMPILE_FLAGS "${CMAKE_CXX_FLAGS_ADD} ${KDL_CFLAGS} -DTESTNAME=\"\\\"${TESTNAME}\\\"\" ")
